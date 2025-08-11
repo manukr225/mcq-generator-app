@@ -1,101 +1,74 @@
 import streamlit as st
 from pytube import YouTube
-import whisper
 import tempfile
 import os
-import torch
+import openai
 from transformers import pipeline
-import random
 
-# Caching models
-@st.cache_resource
-def load_whisper_model():
-    return whisper.load_model("base")
+# Set OpenAI API key from Streamlit secrets
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-@st.cache_resource
-def load_summarizer():
-    return pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+# Title
+st.title("🎓 YouTube Video to MCQ Quiz Generator")
 
-whisper_model = load_whisper_model()
-summarizer = load_summarizer()
+# Input YouTube link
+yt_link = st.text_input("Paste YouTube video link")
 
-st.set_page_config(page_title="AI Quiz Generator", layout="centered")
-st.title("📚 AI Quiz Generator (Free & Open Source)")
+# Start process
+if yt_link:
+    try:
+        st.info("Downloading audio from YouTube...")
+        yt = YouTube(yt_link)
+        audio_stream = yt.streams.filter(only_audio=True).first()
 
-# --- Input Type Selection ---
-input_type = st.radio("Select Input Type:", ["YouTube Link", "Paste Text"])
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_audio:
+            audio_path = temp_audio.name
+            audio_stream.download(filename=audio_path)
 
-transcript = ""
+        st.success("Audio downloaded successfully!")
 
-if input_type == "YouTube Link":
-    yt_url = st.text_input("Enter YouTube video URL:")
+        st.info("Transcribing using OpenAI Whisper API...")
+        with open(audio_path, "rb") as audio_file:
+            transcript_response = openai.Audio.transcribe("whisper-1", audio_file)
+        transcript = transcript_response["text"]
 
-    if yt_url:
-        try:
-            with st.spinner("📥 Downloading and extracting audio..."):
-                yt = YouTube(yt_url)
-                stream = yt.streams.filter(only_audio=True).first()
-                temp_audio = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
-                stream.download(filename=temp_audio.name)
+        st.success("Transcription complete!")
+        st.subheader("📜 Transcript Preview")
+        st.write(transcript[:1000] + "...")  # Show partial text
 
-            with st.spinner("🧠 Transcribing video using Whisper..."):
-                result = whisper_model.transcribe(temp_audio.name)
-                transcript = result['text']
-                os.remove(temp_audio.name)
+        st.info("Generating questions using AI...")
+        qa_prompt = f"""
+        Extract 5 multiple choice questions from this transcript.
+        Provide 4 options each and clearly mark the correct answer.
+        Use this format:
 
-            st.success("✅ Transcription Complete!")
-            st.text_area("📜 Transcript Preview:", value=transcript, height=200)
+        Q: Question text?
+        a) Option A
+        b) Option B
+        c) Option C
+        d) Option D
+        Answer: b) Option B
+        Explanation: ...
 
-        except Exception as e:
-            st.error(f"Error: {e}")
+        Transcript:
+        {transcript}
+        """
 
-elif input_type == "Paste Text":
-    transcript = st.text_area("Paste your content here:", height=300)
+        qa_generator = pipeline("text-generation", model="gpt2", max_length=1024)
+        quiz_output = qa_generator(qa_prompt, num_return_sequences=1)[0]["generated_text"]
 
-# --- Settings ---
-if transcript:
-    st.subheader("⚙️ Quiz Settings")
-    num_questions = st.slider("Number of questions:", 1, 10, 3)
+        st.subheader("📝 Generated Quiz")
+        for block in quiz_output.split("Q:")[1:]:
+            question_parts = block.strip().split("Answer:")
+            question = "Q: " + question_parts[0].strip()
+            answer_block = question_parts[1].strip().split("Explanation:")
+            answer = "Answer: " + answer_block[0].strip()
+            explanation = "Explanation:" + answer_block[1].strip() if len(answer_block) > 1 else ""
 
-    if st.button("🧠 Generate Quiz"):
-        with st.spinner("Summarizing content..."):
-            chunks = [transcript[i:i+1000] for i in range(0, len(transcript), 1000)]
-            summary = ""
-            for chunk in chunks:
-                summary += summarizer(chunk, max_length=100, min_length=30, do_sample=False)[0]['summary_text'] + " "
+            with st.expander(question):
+                st.write(answer)
+                if explanation:
+                    st.markdown(f"**Explanation:** {explanation}")
 
-        with st.spinner("🧪 Generating Questions..."):
-
-            def generate_dummy_mcq(summary, num=3):
-                # Very basic MCQ generator using summary keywords
-                questions = []
-                keywords = list(set(summary.split()))
-                for i in range(num):
-                    if len(keywords) < 4:
-                        break
-                    word = random.choice(keywords)
-                    question = f"What is related to '{word}'?"
-                    options = random.sample(keywords, 4)
-                    answer = options[0]
-                    explanation = f"The keyword '{word}' is associated with '{answer}' in the summary."
-                    questions.append({
-                        "question": question,
-                        "options": options,
-                        "answer": answer,
-                        "explanation": explanation
-                    })
-                return questions
-
-            mcqs = generate_dummy_mcq(summary, num_questions)
-
-        st.success("✅ Quiz Ready!")
-
-        for i, mcq in enumerate(mcqs):
-            st.markdown(f"**Q{i+1}: {mcq['question']}**")
-            for opt in mcq["options"]:
-                st.markdown(f"- {opt}")
-            st.markdown(f"✅ **Answer**: {mcq['answer']}")
-            with st.expander("💡 Explanation"):
-                st.write(mcq["explanation"])
-
-        st.markdown("---")
+    except Exception as e:
+        st.error(f"Something went wrong: {e}")
