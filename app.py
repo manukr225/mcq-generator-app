@@ -8,17 +8,19 @@ from urllib.parse import urlparse, parse_qs
 # Set OpenAI API key from Streamlit secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# Function to clean YouTube URLs
+# Function to clean and standardize YouTube links
 def clean_youtube_url(url):
-    if "youtu.be" in url:
-        video_id = url.split("/")[-1].split("?")[0]
-        return f"https://www.youtube.com/watch?v={video_id}"
-    elif "watch" in url:
-        parsed = urlparse(url)
-        video_id = parse_qs(parsed.query).get("v", [None])[0]
-        if video_id:
+    try:
+        if "youtu.be" in url:
+            video_id = url.split("/")[-1].split("?")[0]
             return f"https://www.youtube.com/watch?v={video_id}"
-    return url
+        elif "watch" in url:
+            parsed = urlparse(url)
+            video_id = parse_qs(parsed.query).get("v", [None])[0]
+            return f"https://www.youtube.com/watch?v={video_id}"
+        return url
+    except:
+        return url
 
 # Title
 st.title("🎓 YouTube Video to MCQ Quiz Generator")
@@ -28,7 +30,9 @@ yt_link = st.text_input("Paste YouTube video link")
 
 # Start process
 if yt_link:
-    yt_link = clean_youtube_url(yt_link)  # Clean the URL
+    yt_link = clean_youtube_url(yt_link)
+    st.write(f"✅ Cleaned link: {yt_link}")  # Optional debug output
+
     try:
         st.info("Downloading audio from YouTube...")
         yt = YouTube(yt_link)
@@ -47,7 +51,7 @@ if yt_link:
 
         st.success("Transcription complete!")
         st.subheader("📜 Transcript Preview")
-        st.write(transcript[:1000] + "...")  # Show preview
+        st.write(transcript[:1000] + "...")  # Show partial text
 
         st.info("Generating questions using GPT-3.5...")
 
