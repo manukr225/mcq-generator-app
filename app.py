@@ -1,11 +1,11 @@
 import streamlit as st
-from pytube import YouTube
 import tempfile
-import os
 import openai
+import os
+from yt_dlp import YoutubeDL
 from urllib.parse import urlparse, parse_qs
 
-# Set OpenAI API key from Streamlit secrets
+# Set OpenAI API key
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # Function to clean and standardize YouTube links
@@ -22,38 +22,46 @@ def clean_youtube_url(url):
     except:
         return url
 
-# Title
+# Streamlit UI
 st.title("🎓 YouTube Video to MCQ Quiz Generator")
-
-# Input YouTube link
 yt_link = st.text_input("Paste YouTube video link")
 
-# Start process
 if yt_link:
     yt_link = clean_youtube_url(yt_link)
-    st.write(f"✅ Cleaned link: {yt_link}")  # Optional debug output
+    st.success(f"✅ Cleaned link: {yt_link}")
 
     try:
-        st.info("Downloading audio from YouTube...")
-        yt = YouTube(yt_link)
-        audio_stream = yt.streams.filter(only_audio=True).first()
+        st.info("📥 Downloading audio using yt_dlp...")
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_audio:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
             audio_path = temp_audio.name
-            audio_stream.download(filename=audio_path)
 
-        st.success("Audio downloaded successfully!")
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': audio_path,
+            'quiet': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+        }
 
-        st.info("Transcribing using OpenAI Whisper API...")
+        with YoutubeDL(ydl_opts) as ydl:
+            ydl.download([yt_link])
+
+        st.success("✅ Audio downloaded successfully!")
+
+        st.info("🔊 Transcribing using OpenAI Whisper API...")
         with open(audio_path, "rb") as audio_file:
             transcript_response = openai.Audio.transcribe("whisper-1", audio_file)
         transcript = transcript_response["text"]
 
-        st.success("Transcription complete!")
+        st.success("📝 Transcription complete!")
         st.subheader("📜 Transcript Preview")
-        st.write(transcript[:1000] + "...")  # Show partial text
+        st.write(transcript[:1000] + "...")
 
-        st.info("Generating questions using GPT-3.5...")
+        st.info("🤖 Generating MCQ quiz using GPT-3.5...")
 
         qa_prompt = f"""
         Generate 5 multiple choice questions from the transcript below.
