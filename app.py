@@ -1,12 +1,12 @@
 import streamlit as st
 import tempfile
-import openai
+from openai import OpenAI
 import os
 from yt_dlp import YoutubeDL
 from urllib.parse import urlparse, parse_qs
 
-# Set OpenAI API key
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# Initialize OpenAI client
+client = OpenAI()
 
 # Function to clean and standardize YouTube links
 def clean_youtube_url(url):
@@ -33,15 +33,18 @@ if yt_link:
     try:
         st.info("📥 Downloading audio using yt_dlp...")
 
-        # Use .m4a format instead of mp3 to avoid needing ffmpeg
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as temp_audio:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
             audio_path = temp_audio.name
 
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': audio_path,
             'quiet': True,
-            'postprocessors': []  # No ffmpeg-based processing
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
         }
 
         with YoutubeDL(ydl_opts) as ydl:
@@ -51,8 +54,11 @@ if yt_link:
 
         st.info("🔊 Transcribing using OpenAI Whisper API...")
         with open(audio_path, "rb") as audio_file:
-            transcript_response = openai.Audio.transcribe("whisper-1", audio_file)
-        transcript = transcript_response["text"]
+            transcript_response = client.audio.transcriptions.create(
+                file=audio_file,
+                model="whisper-1"
+            )
+        transcript = transcript_response.text
 
         st.success("📝 Transcription complete!")
         st.subheader("📜 Transcript Preview")
@@ -77,13 +83,13 @@ if yt_link:
         {transcript}
         """
 
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": qa_prompt}],
             temperature=0.7
         )
 
-        quiz_output = response["choices"][0]["message"]["content"]
+        quiz_output = response.choices[0].message.content
 
         st.subheader("📝 Generated Quiz")
         for block in quiz_output.split("Q:")[1:]:
