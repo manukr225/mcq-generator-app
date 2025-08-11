@@ -33,18 +33,15 @@ if yt_link:
     try:
         st.info("📥 Downloading audio using yt_dlp...")
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
+        # Use .m4a format instead of mp3 to avoid needing ffmpeg
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as temp_audio:
             audio_path = temp_audio.name
 
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': audio_path,
             'quiet': True,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
+            'postprocessors': []  # No ffmpeg-based processing
         }
 
         with YoutubeDL(ydl_opts) as ydl:
