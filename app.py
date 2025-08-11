@@ -3,10 +3,22 @@ from pytube import YouTube
 import tempfile
 import os
 import openai
-from transformers import pipeline
+from urllib.parse import urlparse, parse_qs
 
 # Set OpenAI API key from Streamlit secrets
 openai.api_key = st.secrets["OPENAI_API_KEY"]
+
+# Function to clean YouTube URLs
+def clean_youtube_url(url):
+    if "youtu.be" in url:
+        video_id = url.split("/")[-1].split("?")[0]
+        return f"https://www.youtube.com/watch?v={video_id}"
+    elif "watch" in url:
+        parsed = urlparse(url)
+        video_id = parse_qs(parsed.query).get("v", [None])[0]
+        if video_id:
+            return f"https://www.youtube.com/watch?v={video_id}"
+    return url
 
 # Title
 st.title("🎓 YouTube Video to MCQ Quiz Generator")
@@ -16,6 +28,7 @@ yt_link = st.text_input("Paste YouTube video link")
 
 # Start process
 if yt_link:
+    yt_link = clean_youtube_url(yt_link)  # Clean the URL
     try:
         st.info("Downloading audio from YouTube...")
         yt = YouTube(yt_link)
@@ -34,28 +47,34 @@ if yt_link:
 
         st.success("Transcription complete!")
         st.subheader("📜 Transcript Preview")
-        st.write(transcript[:1000] + "...")  # Show partial text
+        st.write(transcript[:1000] + "...")  # Show preview
 
-        st.info("Generating questions using AI...")
+        st.info("Generating questions using GPT-3.5...")
+
         qa_prompt = f"""
-        Extract 5 multiple choice questions from this transcript.
-        Provide 4 options each and clearly mark the correct answer.
-        Use this format:
+        Generate 5 multiple choice questions from the transcript below.
+        Each question should have 4 options (a-d), and clearly mark the correct answer and explanation.
 
-        Q: Question text?
+        Format:
+        Q: <Question>
         a) Option A
         b) Option B
         c) Option C
         d) Option D
-        Answer: b) Option B
-        Explanation: ...
+        Answer: <correct option letter>) <Correct Option Text>
+        Explanation: <Short explanation>
 
         Transcript:
         {transcript}
         """
 
-        qa_generator = pipeline("text-generation", model="gpt2", max_length=1024)
-        quiz_output = qa_generator(qa_prompt, num_return_sequences=1)[0]["generated_text"]
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": qa_prompt}],
+            temperature=0.7
+        )
+
+        quiz_output = response["choices"][0]["message"]["content"]
 
         st.subheader("📝 Generated Quiz")
         for block in quiz_output.split("Q:")[1:]:
